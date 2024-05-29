@@ -3,12 +3,15 @@ import axios from 'axios';
 
 export default function Home() {
   const [address, setAddress] = useState('');
+  const [network, setNetwork] = useState('sepolia'); // Default to Sepolia
   const [contractCode, setContractCode] = useState('');
   const [error, setError] = useState('');
 
   const handleSearch = async () => {
     try {
-      const res = await axios.get(`/api/contract?address=${address}`);
+      const res = await axios.get(`/api/contract`, {
+        params: { address, network },
+      });
       setContractCode(res.data.SourceCode);
       setError('');
     } catch (err) {
@@ -21,6 +24,15 @@ export default function Home() {
     <div className="min-h-screen bg-gray-100 flex flex-col items-center justify-center">
       <h1 className="text-4xl font-bold mb-8">Contract Clarity</h1>
       <div className="w-full max-w-md">
+        <select
+          className="w-full p-2 border border-gray-300 rounded mb-4"
+          value={network}
+          onChange={(e) => setNetwork(e.target.value)}
+        >
+          <option value="sepolia">Ethereum Sepolia</option>
+          <option value="goerli">Ethereum Goerli</option>
+          <option value="galadriel">Galadriel Devnet</option>
+        </select>
         <input
           type="text"
           className="w-full p-2 border border-gray-300 rounded mb-4"

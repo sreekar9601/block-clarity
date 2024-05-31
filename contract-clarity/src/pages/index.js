@@ -21,22 +21,34 @@ function getChatId(receipt, contract) {
     return chatId;
 }
 
+const chunkString = (str, size) => {
+    const numChunks = Math.ceil(str.length / size);
+    const chunks = new Array(numChunks);
+
+    for (let i = 0, o = 0; i < numChunks; ++i, o += size) {
+        chunks[i] = str.substr(o, size);
+    }
+
+    return chunks;
+};
+
 export default function Home() {
     const [address, setAddress] = useState('');
     const [network, setNetwork] = useState('sepolia'); // Default to Sepolia
     const [contractCode, setContractCode] = useState('');
     const [error, setError] = useState('');
-    const [prompt, setPrompt] = useState('');
     const [response, setResponse] = useState('');
     const [provider, setProvider] = useState(null);
     const [chatId, setChatId] = useState(null);
+    const [maxPromptSize, setMaxPromptSize] = useState(5000); // Adjusted chunk size
 
-    const handleSearch = async () => {
+    const handleFetchContract = async () => {
         try {
             const res = await axios.get(`/api/contract`, {
                 params: { address, network },
             });
-            setContractCode(res.data.SourceCode);
+            const sourceCode = res.data.SourceCode;
+            setContractCode(sourceCode);
             setError('');
         } catch (err) {
             setError('Failed to fetch contract data');
@@ -44,44 +56,102 @@ export default function Home() {
         }
     };
 
-    const handleSendPrompt = async () => {
-        if (!address || !prompt) {
-            setError('Please enter a contract address and prompt');
-            return;
-        }
-
+    const handleExplainContract = async () => {
         if (!provider) {
             setError('Please connect your wallet first');
             return;
         }
 
+        if (!contractCode) {
+            setError('No contract code available to explain. Please fetch the contract first.');
+            return;
+        }
+
+        const chunks = chunkString(contractCode, maxPromptSize);
+
         try {
-            const signer = provider.getSigner();
-            const chatGptContract = new ethers.Contract(chatGptAddress, abi, signer);
-            const tx = await chatGptContract.startChat(prompt);
-            console.log('Transaction:', tx);
+            const initialPrompt = `I will send pieces of code of a smart contract in ${chunks.length} chunks. Please wait for the end of the smart contract.`;
+            const initialChatId = await sendInitialPrompt(initialPrompt);
+            setChatId(initialChatId);
 
-            const receipt = await tx.wait();
-            console.log('Receipt:', receipt);
+            await sendChunksToContract(chunks, initialChatId);
+            const finalPrompt = "All chunks sent. Please summarize the above code in detail.";
 
-            const chatId = getChatId(receipt, chatGptContract);
-            console.log(`Created chat ID: ${chatId}`);
+            await sendFinalPrompt(initialChatId, finalPrompt);
 
-            if (chatId === null) {
-                setError('Failed to get chat ID from the transaction receipt');
-                return;
-            }
-
-            setChatId(chatId);
-            setResponse(`Chat started with ID: ${chatId}. Waiting for response...`);
-
-            // Fetch the message history after the transaction is complete
-            const messages = await chatGptContract.getMessageHistoryContents(chatId);
+            const messages = await getMessageHistoryContents(initialChatId);
             setResponse(messages.join('\n')); // Display messages
 
         } catch (err) {
-            setError('Failed to send prompt to contract');
+            setError('Failed to send chunks to contract');
             console.error(err);
+        }
+    };
+
+    const sendInitialPrompt = async (initialPrompt) => {
+        const signer = provider.getSigner();
+        const chatGptContract = new ethers.Contract(chatGptAddress, abi, signer);
+        
+        try {
+            const gasLimit = await chatGptContract.estimateGas.startChat(initialPrompt);
+            const tx = await chatGptContract.startChat(initialPrompt, { gasLimit });
+            const receipt = await tx.wait();
+            const chatId = getChatId(receipt, chatGptContract);
+            
+            if (chatId === null) {
+                throw new Error('Failed to get chat ID from the transaction receipt');
+            }
+
+            console.log(`Initial prompt sent successfully. Chat ID: ${chatId}`);
+            return chatId;
+        } catch (err) {
+            console.error(`Failed to send initial prompt:`, err);
+            throw err;
+        }
+    };
+
+    const sendChunksToContract = async (chunks, chatId) => {
+        const signer = provider.getSigner();
+        const chatGptContract = new ethers.Contract(chatGptAddress, abi, signer);
+
+        for (let i = 0; i < chunks.length; i++) {
+            const chunkPrompt = `Chunk ${i + 1}/${chunks.length}: ${chunks[i]}`;
+            try {
+                const gasLimit = await chatGptContract.estimateGas.startChat(chunkPrompt);
+                const tx = await chatGptContract.startChat(chunkPrompt, { gasLimit });
+                await tx.wait();
+
+                console.log(`Chunk ${i + 1} sent successfully`);
+            } catch (err) {
+                console.error(`Failed to send chunk ${i + 1}:`, err);
+                throw err; // Stop further processing if a chunk fails
+            }
+        }
+    };
+
+    const sendFinalPrompt = async (chatId, prompt) => {
+        const signer = provider.getSigner();
+        const chatGptContract = new ethers.Contract(chatGptAddress, abi, signer);
+        try {
+            const gasLimit = await chatGptContract.estimateGas.startChat(prompt);
+            const tx = await chatGptContract.startChat(prompt, { gasLimit });
+            await tx.wait();
+            console.log(`Final prompt sent successfully`);
+        } catch (err) {
+            console.error(`Failed to send final prompt:`, err);
+            throw err; // Stop further processing if a chunk fails
+        }
+    };
+
+    const getMessageHistoryContents = async (chatId) => {
+        const signer = provider.getSigner();
+        const chatGptContract = new ethers.Contract(chatGptAddress, abi, signer);
+        try {
+            const messages = await chatGptContract.getMessageHistoryContents(chatId);
+            return messages;
+        } catch (err) {
+            console.error(`Failed to get message history contents:`, err);
+            throw err;
         }
     };
 
@@ -106,24 +176,17 @@ export default function Home() {
                     value={address}
                     onChange={(e) => setAddress(e.target.value)}
                 />
-                <input
-                    type="text"
-                    className="w-full p-2 border border-gray-300 rounded mb-4"
-                    placeholder="Enter your prompt"
-                    value={prompt}
-                    onChange={(e) => setPrompt(e.target.value)}
-                />
                 <button
-                    onClick={handleSearch}
+                    onClick={handleFetchContract}
                     className="w-full bg-blue-500 text-white p-2 rounded"
                 >
-                    Search
+                    Fetch Contract
                 </button>
                 <button
-                    onClick={handleSendPrompt}
+                    onClick={handleExplainContract}
                     className="w-full bg-green-500 text-white p-2 rounded mt-4"
                 >
-                    Send Prompt
+                    Explain Contract
                 </button>
             </div>
             {error && <p className="text-red-500 mt-4">{error}</p>}

@@ -74,13 +74,17 @@ export default function Home() {
             const initialChatId = await sendInitialPrompt(initialPrompt);
             setChatId(initialChatId);
 
-            await sendChunksToContract(chunks, initialChatId);
-            const finalPrompt = "All chunks sent. Please summarize the above code in detail.";
+            for (let i = 0; i < chunks.length; i++) {
+                const chunkPrompt = `Chunk ${i + 1}/${chunks.length}: ${chunks[i]}`;
+                await sendChunkToContract(chunkPrompt, initialChatId);
+                await waitForAssistantResponse(initialChatId); // Wait for the assistant to respond before sending the next chunk
+            }
 
+            const finalPrompt = "All chunks sent. Please summarize the above code in detail.";
             await sendFinalPrompt(initialChatId, finalPrompt);
 
             const messages = await getMessageHistoryContents(initialChatId);
-            setResponse(messages.join('\n')); // Display messages
+            setResponse(messages.map(msg => `${msg.role}: ${msg.content}`).join('\n')); // Display messages
 
         } catch (err) {
             setError('Failed to send chunks to contract');
@@ -110,31 +114,51 @@ export default function Home() {
         }
     };
 
-    const sendChunksToContract = async (chunks, chatId) => {
+    const sendChunkToContract = async (chunkPrompt, chatId) => {
         const signer = provider.getSigner();
         const chatGptContract = new ethers.Contract(chatGptAddress, abi, signer);
 
-        for (let i = 0; i < chunks.length; i++) {
-            const chunkPrompt = `Chunk ${i + 1}/${chunks.length}: ${chunks[i]}`;
-            try {
-                const gasLimit = await chatGptContract.estimateGas.startChat(chunkPrompt);
-                const tx = await chatGptContract.startChat(chunkPrompt, { gasLimit });
-                await tx.wait();
+        try {
+            const gasLimit = await chatGptContract.estimateGas.addMessage(chunkPrompt, chatId);
+            const tx = await chatGptContract.addMessage(chunkPrompt, chatId, { gasLimit });
+            await tx.wait();
 
-                console.log(`Chunk ${i + 1} sent successfully`);
-            } catch (err) {
-                console.error(`Failed to send chunk ${i + 1}:`, err);
-                throw err; // Stop further processing if a chunk fails
-            }
+            console.log(`Chunk sent successfully: ${chunkPrompt}`);
+        } catch (err) {
+            console.error(`Failed to send chunk:`, err);
+            throw err;
         }
+    };
+
+    const waitForAssistantResponse = async (chatId) => {
+        const signer = provider.getSigner();
+        const chatGptContract = new ethers.Contract(chatGptAddress, abi, signer);
+        const checkResponseInterval = 5000; // Check every 5 seconds
+        const maxRetries = 24; // Retry for 2 minutes
+
+        for (let i = 0; i < maxRetries; i++) {
+            const messages = await getMessageHistoryContents(chatId);
+            const lastMessage = messages[messages.length - 1];
+
+            console.log(`Checking response... attempt ${i + 1}/${maxRetries}`);
+            console.log(`Last message: ${lastMessage ? JSON.stringify(lastMessage) : 'None'}`);
+
+            if (lastMessage && lastMessage.role === 'assistant') {
+                return;
+            }
+
+            await new Promise((resolve) => setTimeout(resolve, checkResponseInterval));
+        }
+
+        throw new Error('Assistant did not respond in a timely manner.');
     };
 
     const sendFinalPrompt = async (chatId, prompt) => {
         const signer = provider.getSigner();
         const chatGptContract = new ethers.Contract(chatGptAddress, abi, signer);
         try {
-            const gasLimit = await chatGptContract.estimateGas.startChat(prompt);
-            const tx = await chatGptContract.startChat(prompt, { gasLimit });
+            const gasLimit = await chatGptContract.estimateGas.addMessage(prompt, chatId);
+            const tx = await chatGptContract.addMessage(prompt, chatId, { gasLimit });
             await tx.wait();
             console.log(`Final prompt sent successfully`);
         } catch (err) {
@@ -148,7 +172,10 @@ export default function Home() {
         const chatGptContract = new ethers.Contract(chatGptAddress, abi, signer);
         try {
             const messages = await chatGptContract.getMessageHistoryContents(chatId);
-            return messages;
+            return messages.map(message => ({
+                role: message.role,
+                content: message.content
+            }));
         } catch (err) {
             console.error(`Failed to get message history contents:`, err);
             throw err;

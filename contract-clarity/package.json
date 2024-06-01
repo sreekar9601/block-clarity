@@ -10,10 +10,14 @@
   },
   "dependencies": {
     "axios": "^1.7.2",
+    "dotenv": "^16.4.5",
     "ethers": "^5.7.2",
+    "express": "^4.19.2",
+    "ipfs-http-client": "^60.0.1",
     "next": "14.2.3",
     "react": "^18",
     "react-dom": "^18",
+    "web3": "^4.9.0",
     "ws": "^8.17.0"
   },
   "devDependencies": {

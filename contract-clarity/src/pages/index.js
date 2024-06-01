@@ -1,8 +1,9 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import axios from 'axios';
 import ConnectWalletButton from '../components/ConnectWalletButton';
 import { ethers } from 'ethers';
 import abi from '../abis/ChatGpt.json'; // Ensure this ABI matches the deployed contract
+
 const chatGptAddress = "0xf69475444b076207d2f69d60e67c1f255104b453";
 
 function getChatId(receipt, contract) {
@@ -41,6 +42,17 @@ export default function Home() {
         } catch (err) {
             setError('Failed to fetch contract data');
             setContractCode('');
+        }
+    };
+
+    const handleUploadAndIndex = async () => {
+        try {
+            const res = await axios.post('/api/smartContract', { contractCode });
+            setResponse(`Document uploaded to IPFS with CID: ${res.data.cid}. Indexing response: ${res.data.receipt}`);
+            setError('');
+        } catch (err) {
+            setError('Failed to upload and index the contract code');
+            console.error(err);
         }
     };
 
@@ -118,6 +130,12 @@ export default function Home() {
                     className="w-full bg-blue-500 text-white p-2 rounded"
                 >
                     Search
+                </button>
+                <button
+                    onClick={handleUploadAndIndex}
+                    className="w-full bg-orange-500 text-white p-2 rounded mt-4"
+                >
+                    Upload & Index
                 </button>
                 <button
                     onClick={handleSendPrompt}

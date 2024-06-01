@@ -2,7 +2,7 @@ import { useState } from 'react';
 import axios from 'axios';
 import ConnectWalletButton from '../components/ConnectWalletButton';
 import { ethers } from 'ethers';
-import abi from '../abis/ChatGpt.json'; // Ensure this ABI matches the deployed contract
+import abi from '../abis/ChatGpt.json'; 
 const chatGptAddress = "0xf69475444b076207d2f69d60e67c1f255104b453";
 
 function getChatId(receipt, contract) {
@@ -11,8 +11,8 @@ function getChatId(receipt, contract) {
         try {
             const parsedLog = contract.interface.parseLog(log);
             if (parsedLog && parsedLog.name === "ChatCreated") {
-                chatId = parsedLog.args.chatId.toNumber(); // Use toNumber() for BigNumber
-                break; // Break out of the loop once chatId is found
+                chatId = parsedLog.args.chatId.toNumber(); 
+                break; 
             }
         } catch (error) {
             console.log("Could not parse log:", log);
@@ -58,7 +58,7 @@ const chunkString = (str, size) => {
 
 export default function Home() {
     const [address, setAddress] = useState('');
-    const [network, setNetwork] = useState('sepolia'); // Default to Sepolia
+    const [network, setNetwork] = useState('sepolia'); 
     const [contractCode, setContractCode] = useState('');
     const [error, setError] = useState('');
     const [response, setResponse] = useState([]);
@@ -114,7 +114,6 @@ export default function Home() {
                 const txChunk = await chatGptContract.addMessage(chunkPrompt, currentChatId, { gasLimit: gasLimitChunk });
                 await txChunk.wait();
 
-                // Wait for the LLM to process the chunk
                 let newMessages = await getNewMessages(chatGptContract, currentChatId, currentMessagesCount);
                 while (newMessages.length === 0 || newMessages[newMessages.length - 1].role !== 'assistant') {
                     await new Promise(resolve => setTimeout(resolve, 2000)); // Wait for 2 seconds before checking again
@@ -123,13 +122,11 @@ export default function Home() {
                 setCurrentMessagesCount(prev => prev + newMessages.length);
             }
 
-            // Send final prompt for summary
             const finalPrompt = "All chunks sent. Please summarize the above code in detail.";
             const gasLimitFinal = await chatGptContract.estimateGas.addMessage(finalPrompt, currentChatId);
             const txFinal = await chatGptContract.addMessage(finalPrompt, currentChatId, { gasLimit: gasLimitFinal });
             await txFinal.wait();
 
-            // Fetch summary
             const newMessages = await getNewMessages(chatGptContract, currentChatId, currentMessagesCount);
             setSummary(newMessages.find(msg => msg.role === 'assistant').content);
 
